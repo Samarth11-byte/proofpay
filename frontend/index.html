@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProofPay - milestone evidence check</title>
+<style>
+:root{--ink:#1b2430;--mut:#5b6675;--line:#dfe4ea;--bg:#f5f7fa;--brand:#1a4fd6;--ok:#157347;--warn:#a15c00;--bad:#b02a37}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+.banner{background:#fff3cd;border-bottom:1px solid #e0a800;padding:10px 24px;font-weight:600;font-size:14px}
+.wrap{max-width:1040px;margin:0 auto;padding:24px}
+h1{margin:0 0 4px;font-size:26px} .sub{color:var(--mut);margin:0 0 18px}
+.roles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+.role{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--mut)}
+.role b{display:block;color:var(--ink);margin-bottom:2px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:22px}
+.panel h2{margin:0 0 12px;font-size:17px}
+.row{display:grid;grid-template-columns:2fr 1fr 2fr;gap:12px}
+label{font-size:12px;color:var(--mut);display:block;margin-bottom:3px}
+input,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+textarea{min-height:64px;resize:vertical}
+button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer}
+button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+button.go{background:var(--ok);color:#fff;border-color:var(--ok)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.title{font-weight:650;font-size:16px} .meta{color:var(--mut);font-size:13px;margin-top:2px}
+.chip{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.s-open{background:#e9ecef}.s-proof_submitted{background:#e0ecff;color:#1a4fd6}.s-reviewed{background:#fff3cd;color:var(--warn)}
+.s-approved{background:#e0f2ff;color:#0b6fa4}.s-paid{background:#d1f0df;color:var(--ok)}
+.sec{margin-top:12px;font-size:13px}
+.sec .lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.proof{background:#f8f9fb;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap}
+.checks{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.check{border-radius:6px;padding:3px 8px;font-size:12px;font-weight:600}
+.yes{background:#d1f0df;color:var(--ok)}.no{background:#f8d7da;color:var(--bad)}
+.rec{font-weight:650}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.note{font-size:12px;color:var(--mut)}
+.empty{color:var(--mut);text-align:center;padding:24px}
+@media(max-width:760px){.roles,.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="banner" id="banner">SANDBOX TEST MONEY ONLY - this demo uses PayPal's sandbox and made-up data. No real payments, no real customers.</div>
+<div class="wrap">
+<h1>ProofPay</h1>
+<p class="sub">A freelancer milestone helper: an AI reads the submitted evidence text and gives a recommendation. You decide what to invoice.</p>
+
+<div class="roles">
+  <div class="role"><b>1. Freelancer</b>Creates a milestone and submits proof text.</div>
+  <div class="role"><b>2. AI check</b>Reads the proof text only. Never opens files or checks quality. A recommendation, not a decision.</div>
+  <div class="role"><b>3. You approve</b>Approving only sends a PayPal invoice to the client. It does not move money.</div>
+  <div class="role"><b>4. Client pays</b>The client pays the invoice separately in PayPal. Refresh status reads it back from PayPal.</div>
+</div>
+
+<div class="panel">
+  <h2>New milestone</h2>
+  <div class="row">
+    <div><label for="title">Title</label><input id="title" placeholder="Logo design v1"></div>
+    <div><label for="amount">Amount (USD, sandbox)</label><input id="amount" type="number" min="1" step="0.01" placeholder="5.00"></div>
+    <div><label for="email">Client email (sandbox buyer)</label><input id="email" placeholder="sb-...@personal.example.com"></div>
+  </div>
+  <div style="margin-top:10px"><label for="desc">Agreed scope</label><textarea id="desc" placeholder="What was agreed for this milestone"></textarea></div>
+  <div class="actions"><button class="primary" id="createBtn">Create milestone</button></div>
+</div>
+
+<div id="list"></div>
+<p class="note">Limits: the AI sees only the proof text, so a list of file names is a self-reported claim. Real file inspection is not part of this demo. Payment status comes from PayPal's invoice API when you press Refresh status.</p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LABEL = {open:'Waiting for proof',proof_submitted:'Proof submitted',reviewed:'AI reviewed',approved:'Invoice sent',paid:'Paid (sandbox)'};
+const proofDraft = {};
+
+function verdictHtml(raw){
+  if(!raw) return '';
+  let v; try{ v = JSON.parse(raw); }catch(e){ return `<div class="sec"><div class="lbl">AI check</div>${esc(raw)}</div>`; }
+  const chk = (name, ok) => `<span class="check ${ok?'yes':'no'}">${ok?'&#10003;':'&#10007;'} ${name}</span>`;
+  const approve = v.recommendation === 'approve';
+  return `<div class="sec"><div class="lbl">AI check of the proof text (recommendation only)</div>
+    <div class="checks">${chk('Present',v.present)}${chk('Readable',v.readable)}${chk('Consistent with scope',v.consistent)}</div>
+    <div class="rec">Recommendation: ${approve?'looks sufficient to invoice':'ask for changes'}</div>
+    ${v.word_check?`<div>Word count (counted in code): ${v.word_check.supplied} supplied of about ${v.word_check.required} required</div>`:''}
+    <div>Gaps: ${esc(v.gaps || 'none noted')}</div></div>`;
+}
+
+function card(m){
+  const st = m.status;
+  const canProof = st==='open' || st==='proof_submitted' || st==='reviewed';
+  const canReview = !!m.proof_text && (st==='proof_submitted' || st==='reviewed');
+  const canApprove = st==='reviewed';
+  const canRefresh = !!m.invoice_id;
+  const draft = proofDraft[m.id] ?? '';
+  return `<div class="card" data-id="${m.id}">
+    <div class="head"><div><div class="title">${esc(m.title)} <span class="meta">#${m.id}</span></div>
+      <div class="meta">$${Number(m.amount_usd).toFixed(2)} USD (sandbox) &middot; client ${esc(m.client_email)}</div></div>
+      <span class="chip s-${st}">${LABEL[st]||esc(st)}</span></div>
+    <div class="sec"><div class="lbl">Agreed scope</div>${esc(m.description)}</div>
+    ${m.proof_text?`<div class="sec"><div class="lbl">Submitted proof (text)</div><div class="proof">${esc(m.proof_text)}</div></div>`:''}
+    ${canProof?`<div class="sec"><div class="lbl">${m.proof_text?'Replace proof text':'Submit proof text'}</div>
+      <textarea data-proof="${m.id}" placeholder="Describe what was delivered">${esc(draft)}</textarea></div>`:''}
+    ${verdictHtml(m.ai_verdict)}
+    ${m.invoice_id?`<div class="sec"><div class="lbl">PayPal sandbox invoice</div>${esc(m.invoice_id)}${m.payer_url?` &middot; <a href="${esc(m.payer_url)}" target="_blank" rel="noopener">client pay link</a>`:''}</div>`:''}
+    <div class="actions">
+      ${canProof?`<button data-act="proof" ${''}>Save proof</button>`:''}
+      <button data-act="review" ${canReview?'':'disabled'}>Run AI check</button>
+      <button class="go" data-act="approve" ${canApprove?'':'disabled'}>Approve &amp; send sandbox invoice</button>
+      <button data-act="refresh" ${canRefresh?'':'disabled'}>Refresh status from PayPal</button>
+      <span class="note">${st==='approved'?'Waiting for the client to pay in PayPal.':st==='paid'?'PayPal reports this invoice as paid.':''}</span>
+    </div></div>`;
+}
+
+async function load(){
+  const rows = await (await fetch('/api/milestones')).json();
+  $('#list').innerHTML = rows.length ? rows.map(card).join('') : '<div class="card empty">No milestones yet.</div>';
+}
+async function post(url, body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+}
+$('#createBtn').onclick = async () => {
+  const b = {title:$('#title').value.trim(), description:$('#desc').value.trim(), amount_usd:$('#amount').value, client_email:$('#email').value.trim()};
+  if(!b.title||!b.description||!b.amount_usd||!b.client_email){alert('Fill in all four fields.');return;}
+  await post('/api/milestones', b); ['#title','#desc','#amount','#email'].forEach(s=>$(s).value=''); load();
+};
+$('#list').addEventListener('input', e => { const id=e.target.dataset.proof; if(id) proofDraft[id]=e.target.value; });
+$('#list').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]'); if(!btn) return;
+  const id = btn.closest('.card').dataset.id, act = btn.dataset.act;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = 'Working...';
+  try{
+    if(act==='proof'){ const t=(proofDraft[id]||'').trim(); if(!t){alert('Write the proof text first.');} else { await post(`/api/milestones/${id}/proof`,{proof_text:t}); delete proofDraft[id]; } }
+    else if(act==='approve'){
+      if(!confirm('Approve and send a SANDBOX PayPal invoice to the client? Test money only. The client still pays separately.')) { }
+      else { const r=await post(`/api/milestones/${id}/approve`); if(!r.ok) alert('Invoice failed ('+r.status+').'); }
+    } else await post(`/api/milestones/${id}/${act}`);
+  } finally { await load(); }
+});
+fetch('/api/config').then(r=>r.json()).then(c=>{ if(c.mock){ $('#banner').textContent='MOCK MODE - no real PayPal or AI calls. Everything shown is simulated.'; $('#banner').style.background='#f8d7da'; }});
+load();
+</script>
+</body>
+</html>
